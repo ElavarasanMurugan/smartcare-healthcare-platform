@@ -65,7 +65,9 @@ public class UserService {
         existingUser.setFullName(request.fullName().trim());
         existingUser.setEmail(normalizedEmail);
         existingUser.setPhoneNumber(
-                request.phoneNumber() != null ? request.phoneNumber().trim() : null
+                (request.phoneNumber() != null && !request.phoneNumber().isBlank())
+                        ? request.phoneNumber().trim()
+                        : null
         );
 
         User updatedUser = userRepository.save(existingUser);

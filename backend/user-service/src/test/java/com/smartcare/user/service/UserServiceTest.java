@@ -143,6 +143,16 @@ class UserServiceTest {
     }
 
     @Test
+    void updateUser_notFound_throwsUserNotFoundException() {
+        when(userRepository.findById(88L)).thenReturn(Optional.empty());
+
+        UserRequest updateRequest = new UserRequest("New Name", "new@example.com", null);
+
+        assertThrows(UserNotFoundException.class, () -> userService.updateUser(88L, updateRequest));
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void deleteUser_existingUser_deletesEntity() {
         User existing = new User("To Delete", "delete@example.com", null);
         existing.setId(7L);

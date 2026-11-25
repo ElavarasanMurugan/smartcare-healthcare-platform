@@ -46,6 +46,13 @@ class UserRequestValidationTest {
     }
 
     @Test
+    void validInternationalPhoneWithSpacesAndParentheses_hasNoViolations() {
+        UserRequest request = new UserRequest("Riya Patel", "riya.patel@example.com", "+1 (555) 123-4567");
+        Set<ConstraintViolation<UserRequest>> violations = validator.validate(request);
+        assertTrue(violations.isEmpty());
+    }
+
+    @Test
     void blankFullName_failsValidation() {
         UserRequest request = new UserRequest("   ", "riya@example.com", null);
         Set<ConstraintViolation<UserRequest>> violations = validator.validate(request);
@@ -53,8 +60,32 @@ class UserRequestValidationTest {
     }
 
     @Test
+    void fullNameExceedingMaxLength_failsValidation() {
+        String longName = "A".repeat(101);
+        UserRequest request = new UserRequest(longName, "riya@example.com", null);
+        Set<ConstraintViolation<UserRequest>> violations = validator.validate(request);
+        assertFalse(violations.isEmpty());
+    }
+
+    @Test
     void invalidEmail_failsValidation() {
         UserRequest request = new UserRequest("Riya Patel", "not-an-email", null);
+        Set<ConstraintViolation<UserRequest>> violations = validator.validate(request);
+        assertFalse(violations.isEmpty());
+    }
+
+    @Test
+    void emailExceedingMaxLength_failsValidation() {
+        String localPart = "a".repeat(245);
+        String longEmail = localPart + "@example.com"; // 257 chars > 254
+        UserRequest request = new UserRequest("Riya Patel", longEmail, null);
+        Set<ConstraintViolation<UserRequest>> violations = validator.validate(request);
+        assertFalse(violations.isEmpty());
+    }
+
+    @Test
+    void invalidPhoneNumberFormat_failsValidation() {
+        UserRequest request = new UserRequest("Riya Patel", "riya@example.com", "invalid-phone");
         Set<ConstraintViolation<UserRequest>> violations = validator.validate(request);
         assertFalse(violations.isEmpty());
     }
