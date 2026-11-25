@@ -1,14 +1,62 @@
 package com.smartcare.user.controller;
 
+import com.smartcare.user.dto.UserRequest;
+import com.smartcare.user.dto.UserResponse;
+import com.smartcare.user.service.UserService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
+/**
+ * REST controller exposing CRUD endpoints for SmartCare users.
+ */
 @RestController
-@RequestMapping("api/v1/users")
+@RequestMapping("/api/v1/users")
 public class UserController {
+
+    private final UserService userService;
+
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @PostMapping
+    public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserRequest request) {
+        UserResponse created = userService.createUser(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
     @GetMapping
-    public String getUsers(){
-        return "SmartCare service is working";
+    public ResponseEntity<List<UserResponse>> getAllUsers() {
+        return ResponseEntity.ok(userService.getAllUsers());
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<UserResponse> getUserById(@PathVariable Long id) {
+        return ResponseEntity.ok(userService.getUserById(id));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<UserResponse> updateUser(
+            @PathVariable Long id,
+            @Valid @RequestBody UserRequest request
+    ) {
+        return ResponseEntity.ok(userService.updateUser(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
+        userService.deleteUser(id);
+        return ResponseEntity.noContent().build();
     }
 }
