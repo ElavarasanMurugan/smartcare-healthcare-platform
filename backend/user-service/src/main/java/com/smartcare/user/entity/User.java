@@ -40,6 +40,10 @@ public class User {
     @Column(name = "phone_number", length = 20)
     private String phoneNumber;
 
+    // Nullable at the DB column level so existing rows without passwords remain migration-safe.
+    @Column(name = "password_hash", length = 255)
+    private String passwordHash;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -56,6 +60,13 @@ public class User {
         this.fullName = fullName;
         this.email = email;
         this.phoneNumber = phoneNumber;
+    }
+
+    public User(String fullName, String email, String phoneNumber, String passwordHash) {
+        this.fullName = fullName;
+        this.email = email;
+        this.phoneNumber = phoneNumber;
+        this.passwordHash = passwordHash;
     }
 
     @PrePersist
@@ -100,6 +111,14 @@ public class User {
 
     public void setPhoneNumber(String phoneNumber) {
         this.phoneNumber = phoneNumber;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 
     public Instant getCreatedAt() {

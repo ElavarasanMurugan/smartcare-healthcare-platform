@@ -1,25 +1,30 @@
 package com.smartcare.user.service;
 
+import com.smartcare.user.dto.UserRegistrationRequest;
 import com.smartcare.user.dto.UserRequest;
 import com.smartcare.user.dto.UserResponse;
 import com.smartcare.user.entity.User;
 import com.smartcare.user.exception.DuplicateEmailException;
 import com.smartcare.user.exception.UserNotFoundException;
 import com.smartcare.user.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,12 +36,24 @@ class UserServiceTest {
     @Mock
     private UserRepository userRepository;
 
-    @InjectMocks
+    private PasswordEncoder passwordEncoder;
     private UserService userService;
 
+    @BeforeEach
+    void setUp() {
+        passwordEncoder = new BCryptPasswordEncoder();
+        userService = new UserService(userRepository, passwordEncoder);
+    }
+
     @Test
-    void createUser_success_normalizesEmailAndReturnsResponse() {
-        UserRequest request = new UserRequest("  Aarav Sharma  ", "  Aarav.Sharma@Example.COM ", " +91-9876543210 ");
+    void createUser_success_hashesPasswordWithBcryptAndNormalizesEmail() {
+        String rawPassword = "StrongPassword123!";
+        UserRegistrationRequest request = new UserRegistrationRequest(
+                "  Aarav Sharma  ",
+                "  Aarav.Sharma@Example.COM ",
+                " +91-9876543210 ",
+                rawPassword
+        );
         when(userRepository.existsByEmail("aarav.sharma@example.com")).thenReturn(false);
 
         Instant now = Instant.now();
@@ -58,6 +75,12 @@ class UserServiceTest {
         assertEquals("aarav.sharma@example.com", savedInput.getEmail());
         assertEquals("+91-9876543210", savedInput.getPhoneNumber());
 
+        // Verify BCrypt hashing
+        assertNotNull(savedInput.getPasswordHash());
+        assertNotEquals(rawPassword, savedInput.getPasswordHash());
+        assertTrue(savedInput.getPasswordHash().startsWith("$2"));
+        assertTrue(passwordEncoder.matches(rawPassword, savedInput.getPasswordHash()));
+
         assertNotNull(response);
         assertEquals(1L, response.id());
         assertEquals("aarav.sharma@example.com", response.email());
@@ -65,7 +88,12 @@ class UserServiceTest {
 
     @Test
     void createUser_duplicateEmail_throwsDuplicateEmailException() {
-        UserRequest request = new UserRequest("Aarav Sharma", "Aarav@Example.com", null);
+        UserRegistrationRequest request = new UserRegistrationRequest(
+                "Aarav Sharma",
+                "Aarav@Example.com",
+                null,
+                "StrongPassword123!"
+        );
         when(userRepository.existsByEmail("aarav@example.com")).thenReturn(true);
 
         assertThrows(DuplicateEmailException.class, () -> userService.createUser(request));
@@ -74,7 +102,7 @@ class UserServiceTest {
 
     @Test
     void getUserById_found_returnsUserResponse() {
-        User user = new User("Priya Nair", "priya@example.com", "9999999999");
+        User user = new User("Priya Nair", "priya@example.com", "9999999999", "$2a$10$dummyhash");
         user.setId(10L);
         user.setCreatedAt(Instant.now());
         user.setUpdatedAt(Instant.now());
@@ -97,9 +125,9 @@ class UserServiceTest {
 
     @Test
     void getAllUsers_returnsMappedList() {
-        User u1 = new User("User One", "one@example.com", null);
+        User u1 = new User("User One", "one@example.com", null, "$2a$10$hash1");
         u1.setId(1L);
-        User u2 = new User("User Two", "two@example.com", "12345");
+        User u2 = new User("User Two", "two@example.com", "1234567", "$2a$10$hash2");
         u2.setId(2L);
 
         when(userRepository.findAll()).thenReturn(List.of(u1, u2));
@@ -113,30 +141,30 @@ class UserServiceTest {
 
     @Test
     void updateUser_keepingSameEmail_succeeds() {
-        User existing = new User("Old Name", "same@example.com", "111");
+        User existing = new User("Old Name", "same@example.com", "1111111", "$2a$10$existinghash");
         existing.setId(5L);
 
         when(userRepository.findById(5L)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        UserRequest updateRequest = new UserRequest("New Name", " SAME@Example.COM ", "222");
+        UserRequest updateRequest = new UserRequest("New Name", " SAME@Example.COM ", "2222222");
         UserResponse response = userService.updateUser(5L, updateRequest);
 
         assertEquals("New Name", response.fullName());
         assertEquals("same@example.com", response.email());
-        assertEquals("222", response.phoneNumber());
+        assertEquals("2222222", response.phoneNumber());
         verify(userRepository, never()).existsByEmail(any());
     }
 
     @Test
     void updateUser_changingToExistingEmail_throwsDuplicateEmailException() {
-        User existing = new User("Old Name", "old@example.com", "111");
+        User existing = new User("Old Name", "old@example.com", "1111111", "$2a$10$existinghash");
         existing.setId(5L);
 
         when(userRepository.findById(5L)).thenReturn(Optional.of(existing));
         when(userRepository.existsByEmail("taken@example.com")).thenReturn(true);
 
-        UserRequest updateRequest = new UserRequest("Old Name", "taken@example.com", "111");
+        UserRequest updateRequest = new UserRequest("Old Name", "taken@example.com", "1111111");
 
         assertThrows(DuplicateEmailException.class, () -> userService.updateUser(5L, updateRequest));
         verify(userRepository, never()).save(any());
@@ -154,7 +182,7 @@ class UserServiceTest {
 
     @Test
     void deleteUser_existingUser_deletesEntity() {
-        User existing = new User("To Delete", "delete@example.com", null);
+        User existing = new User("To Delete", "delete@example.com", null, "$2a$10$existinghash");
         existing.setId(7L);
 
         when(userRepository.findById(7L)).thenReturn(Optional.of(existing));

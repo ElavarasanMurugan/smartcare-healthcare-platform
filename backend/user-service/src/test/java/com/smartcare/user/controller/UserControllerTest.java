@@ -1,5 +1,6 @@
 package com.smartcare.user.controller;
 
+import com.smartcare.user.dto.UserRegistrationRequest;
 import com.smartcare.user.dto.UserRequest;
 import com.smartcare.user.dto.UserResponse;
 import com.smartcare.user.exception.DuplicateEmailException;
@@ -41,16 +42,17 @@ class UserControllerTest {
     private UserService userService;
 
     @Test
-    void createUser_validRequest_returns201() throws Exception {
+    void createUser_validRequest_returns201WithoutCredentials() throws Exception {
         Instant now = Instant.parse("2026-01-01T10:00:00Z");
         UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", "+91-9876543210", now, now);
-        when(userService.createUser(any(UserRequest.class))).thenReturn(response);
+        when(userService.createUser(any(UserRegistrationRequest.class))).thenReturn(response);
 
         String body = """
                 {
                   "fullName": "Aarav Sharma",
                   "email": "aarav@example.com",
-                  "phoneNumber": "+91-9876543210"
+                  "phoneNumber": "+91-9876543210",
+                  "password": "StrongPassword123!"
                 }
                 """;
 
@@ -60,7 +62,81 @@ class UserControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.fullName").value("Aarav Sharma"))
-                .andExpect(jsonPath("$.email").value("aarav@example.com"));
+                .andExpect(jsonPath("$.email").value("aarav@example.com"))
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist());
+    }
+
+    @Test
+    void createUser_missingPassword_returns400() throws Exception {
+        String body = """
+                {
+                  "fullName": "Aarav Sharma",
+                  "email": "aarav@example.com"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors.password").exists());
+    }
+
+    @Test
+    void createUser_emptyPassword_returns400() throws Exception {
+        String body = """
+                {
+                  "fullName": "Aarav Sharma",
+                  "email": "aarav@example.com",
+                  "password": ""
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors.password").exists());
+    }
+
+    @Test
+    void createUser_shortPassword_returns400() throws Exception {
+        String body = """
+                {
+                  "fullName": "Aarav Sharma",
+                  "email": "aarav@example.com",
+                  "password": "short"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors.password").exists());
+    }
+
+    @Test
+    void createUser_passwordExceeding72Bytes_returns400() throws Exception {
+        String longPassword = "A".repeat(73);
+        String body = """
+                {
+                  "fullName": "Aarav Sharma",
+                  "email": "aarav@example.com",
+                  "password": "%s"
+                }
+                """.formatted(longPassword);
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors.password").exists());
     }
 
     @Test
@@ -68,7 +144,8 @@ class UserControllerTest {
         String body = """
                 {
                   "fullName": "",
-                  "email": "invalid-email"
+                  "email": "invalid-email",
+                  "password": "StrongPassword123!"
                 }
                 """;
 
@@ -89,7 +166,8 @@ class UserControllerTest {
         String body = """
                 {
                   "fullName": "Aarav Sharma",
-                  "email": "%s"
+                  "email": "%s",
+                  "password": "StrongPassword123!"
                 }
                 """.formatted(longEmail);
 
@@ -122,7 +200,8 @@ class UserControllerTest {
         String body = """
                 {
                   "fullName": 12345,
-                  "email": "aarav@example.com"
+                  "email": "aarav@example.com",
+                  "password": "StrongPassword123!"
                 }
                 """;
 
@@ -141,7 +220,8 @@ class UserControllerTest {
         String body = """
                 {
                   "fullName": "Aarav Sharma",
-                  "email": true
+                  "email": true,
+                  "password": "StrongPassword123!"
                 }
                 """;
 
@@ -158,7 +238,8 @@ class UserControllerTest {
         String body = """
                 {
                   "fullName": ["Aarav", "Sharma"],
-                  "email": "aarav@example.com"
+                  "email": "aarav@example.com",
+                  "password": "StrongPassword123!"
                 }
                 """;
 
@@ -176,7 +257,8 @@ class UserControllerTest {
                 {
                   "fullName": "Aarav Sharma",
                   "email": "aarav@example.com",
-                  "phoneNumber": {"number": "9876543210"}
+                  "phoneNumber": {"number": "9876543210"},
+                  "password": "StrongPassword123!"
                 }
                 """;
 
@@ -186,6 +268,111 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message").value("Invalid field type in JSON request body."));
+    }
+
+    @Test
+    void createUser_duplicateEmail_returns409() throws Exception {
+        when(userService.createUser(any(UserRegistrationRequest.class)))
+                .thenThrow(new DuplicateEmailException("aarav@example.com"));
+
+        String body = """
+                {
+                  "fullName": "Aarav Sharma",
+                  "email": "aarav@example.com",
+                  "password": "StrongPassword123!"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"));
+    }
+
+    @Test
+    void createUser_databaseUniqueConstraintViolation_returns409WithoutSqlLeak() throws Exception {
+        when(userService.createUser(any(UserRegistrationRequest.class)))
+                .thenThrow(new DataIntegrityViolationException("ERROR: duplicate key value violates unique constraint \"uk_users_email\""));
+
+        String body = """
+                {
+                  "fullName": "Aarav Sharma",
+                  "email": "aarav@example.com",
+                  "password": "StrongPassword123!"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message").value("A user with this email already exists."));
+    }
+
+    @Test
+    void getAllUsers_returns200WithoutCredentials() throws Exception {
+        Instant now = Instant.parse("2026-01-01T10:00:00Z");
+        when(userService.getAllUsers()).thenReturn(List.of(
+                new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, now, now)
+        ));
+
+        mockMvc.perform(get("/api/v1/users"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].email").value("aarav@example.com"))
+                .andExpect(jsonPath("$[0].password").doesNotExist())
+                .andExpect(jsonPath("$[0].passwordHash").doesNotExist());
+    }
+
+    @Test
+    void getUserById_found_returns200WithoutCredentials() throws Exception {
+        Instant now = Instant.parse("2026-01-01T10:00:00Z");
+        UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, now, now);
+        when(userService.getUserById(1L)).thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/users/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.fullName").value("Aarav Sharma"))
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist());
+    }
+
+    @Test
+    void getUserById_notFound_returns404() throws Exception {
+        when(userService.getUserById(99L)).thenThrow(new UserNotFoundException(99L));
+
+        mockMvc.perform(get("/api/v1/users/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"));
+    }
+
+    @Test
+    void updateUser_validRequest_returns200() throws Exception {
+        Instant now = Instant.parse("2026-01-01T10:00:00Z");
+        UserResponse response = new UserResponse(1L, "Updated Name", "updated@example.com", "9876543210", now, now);
+        when(userService.updateUser(eq(1L), any(UserRequest.class))).thenReturn(response);
+
+        String body = """
+                {
+                  "fullName": "Updated Name",
+                  "email": "updated@example.com",
+                  "phoneNumber": "9876543210"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fullName").value("Updated Name"))
+                .andExpect(jsonPath("$.email").value("updated@example.com"))
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist());
     }
 
     @Test
@@ -255,103 +442,6 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message").value("Invalid field type in JSON request body."));
-    }
-
-    @Test
-    void createUser_duplicateEmail_returns409() throws Exception {
-        when(userService.createUser(any(UserRequest.class)))
-                .thenThrow(new DuplicateEmailException("aarav@example.com"));
-
-        String body = """
-                {
-                  "fullName": "Aarav Sharma",
-                  "email": "aarav@example.com"
-                }
-                """;
-
-        mockMvc.perform(post("/api/v1/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.error").value("Conflict"));
-    }
-
-    @Test
-    void createUser_databaseUniqueConstraintViolation_returns409WithoutSqlLeak() throws Exception {
-        when(userService.createUser(any(UserRequest.class)))
-                .thenThrow(new DataIntegrityViolationException("ERROR: duplicate key value violates unique constraint \"uk_users_email\""));
-
-        String body = """
-                {
-                  "fullName": "Aarav Sharma",
-                  "email": "aarav@example.com"
-                }
-                """;
-
-        mockMvc.perform(post("/api/v1/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.message").value("A user with this email already exists."));
-    }
-
-    @Test
-    void getAllUsers_returns200() throws Exception {
-        Instant now = Instant.parse("2026-01-01T10:00:00Z");
-        when(userService.getAllUsers()).thenReturn(List.of(
-                new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, now, now)
-        ));
-
-        mockMvc.perform(get("/api/v1/users"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(1))
-                .andExpect(jsonPath("$[0].email").value("aarav@example.com"));
-    }
-
-    @Test
-    void getUserById_found_returns200() throws Exception {
-        Instant now = Instant.parse("2026-01-01T10:00:00Z");
-        UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, now, now);
-        when(userService.getUserById(1L)).thenReturn(response);
-
-        mockMvc.perform(get("/api/v1/users/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.fullName").value("Aarav Sharma"));
-    }
-
-    @Test
-    void getUserById_notFound_returns404() throws Exception {
-        when(userService.getUserById(99L)).thenThrow(new UserNotFoundException(99L));
-
-        mockMvc.perform(get("/api/v1/users/99"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.status").value(404))
-                .andExpect(jsonPath("$.error").value("Not Found"));
-    }
-
-    @Test
-    void updateUser_validRequest_returns200() throws Exception {
-        Instant now = Instant.parse("2026-01-01T10:00:00Z");
-        UserResponse response = new UserResponse(1L, "Updated Name", "updated@example.com", "9876543210", now, now);
-        when(userService.updateUser(eq(1L), any(UserRequest.class))).thenReturn(response);
-
-        String body = """
-                {
-                  "fullName": "Updated Name",
-                  "email": "updated@example.com",
-                  "phoneNumber": "9876543210"
-                }
-                """;
-
-        mockMvc.perform(put("/api/v1/users/1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.fullName").value("Updated Name"))
-                .andExpect(jsonPath("$.email").value("updated@example.com"));
     }
 
     @Test

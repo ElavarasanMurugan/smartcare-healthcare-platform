@@ -1,11 +1,13 @@
 package com.smartcare.user.service;
 
+import com.smartcare.user.dto.UserRegistrationRequest;
 import com.smartcare.user.dto.UserRequest;
 import com.smartcare.user.dto.UserResponse;
 import com.smartcare.user.entity.User;
 import com.smartcare.user.exception.DuplicateEmailException;
 import com.smartcare.user.exception.UserNotFoundException;
 import com.smartcare.user.repository.UserRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,20 +21,23 @@ import java.util.Locale;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
-    public UserResponse createUser(UserRequest request) {
+    public UserResponse createUser(UserRegistrationRequest request) {
         String normalizedEmail = normalizeEmail(request.email());
 
         if (userRepository.existsByEmail(normalizedEmail)) {
             throw new DuplicateEmailException(normalizedEmail);
         }
 
-        User user = request.toEntity(normalizedEmail);
+        String passwordHash = passwordEncoder.encode(request.password());
+        User user = request.toEntity(normalizedEmail, passwordHash);
         User savedUser = userRepository.save(user);
         return UserResponse.fromEntity(savedUser);
     }
