@@ -1,8 +1,8 @@
 # SmartCare User Service API (`v1`)
 
-The **User Service** is a Spring Boot microservice (Java 17, Spring Data JPA, Hibernate, PostgreSQL/Supabase) running on port `8081` by default, using the `user_service` database schema.
+The **User Service** is a Spring Boot microservice (Java 17, Spring Data JPA, Hibernate, Spring Security, PostgreSQL/Supabase) running on port `8081` by default, using the `user_service` database schema.
 
-Base URL (local): `http://localhost:8081/api/v1/users`
+Base URL (local): `http://localhost:8081`
 
 ---
 
@@ -10,6 +10,7 @@ Base URL (local): `http://localhost:8081/api/v1/users`
 
 | HTTP Method | Endpoint | Description | Request DTO | Success Status |
 | --- | --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/login` | Authenticate user and issue JWT | `LoginRequest` | `200 OK` |
 | `POST` | `/api/v1/users` | Register a new user with a password | `UserRegistrationRequest` | `201 Created` |
 | `GET` | `/api/v1/users` | Retrieve all users | — | `200 OK` |
 | `GET` | `/api/v1/users/{id}` | Retrieve a user by ID | — | `200 OK` |
@@ -18,7 +19,67 @@ Base URL (local): `http://localhost:8081/api/v1/users`
 
 ---
 
-## 2. Password Security & BCrypt Hashing (Phase 3)
+## 2. Authentication & JWT (Phase 4)
+
+### Login Endpoint (`POST /api/v1/auth/login`)
+
+**Request JSON:**
+```json
+{
+  "email": "arun.phase3@example.com",
+  "password": "SmartCare@123"
+}
+```
+- `email`: Required (`@NotBlank`), valid email format (`@Email`), max 254 characters, normalized to lowercase and trimmed before lookup.
+- `password`: Required (`@NotBlank`), verified against the stored BCrypt hash using `PasswordEncoder.matches(...)`.
+
+**Successful Login Response (`200 OK`):**
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhcnVuLnBoYXNlM0BleGFtcGxlLmNvbSIsImlhdCI6MTc5NTc2MDAwMCwiZXhwIjoxNzk1NzYzNjAwfQ.signature",
+  "tokenType": "Bearer",
+  "expiresIn": 3600,
+  "user": {
+    "id": 1,
+    "fullName": "Arun Kumar",
+    "email": "arun.phase3@example.com"
+  }
+}
+```
+
+**Invalid Credentials Response (`401 Unauthorized`):**
+Returned for both an unregistered email and an incorrect password so attackers cannot enumerate registered accounts:
+```json
+{
+  "timestamp": "2026-11-27T09:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid email or password.",
+  "path": "/api/v1/auth/login"
+}
+```
+
+### JWT Structure & Purpose
+A JSON Web Token (JWT) has three Base64URL-encoded parts separated by dots (`header.payload.signature`):
+1. **Header**: Signing algorithm (`HS256`).
+2. **Payload (Claims)**:
+   - `sub` (Subject): User's unique ID (e.g. `"1"`).
+   - `email`: Normalized user email.
+   - `iat`: Issued-at timestamp.
+   - `exp`: Expiration timestamp.
+   - *Passwords and password hashes are never included in JWT claims.*
+3. **Signature**: HMAC-SHA256 signature computed with `JWT_SECRET` so any tampering is detected.
+
+### Sending the Token in Future Requests
+Clients should include the token in the HTTP `Authorization` header:
+```http
+Authorization: Bearer <accessToken>
+```
+*(Note: In Phase 4, Spring Security is configured as stateless with CSRF, HTTP Basic, and form login disabled, permitting `/api/v1/auth/login` and `/api/v1/users/**`. Endpoint-level JWT enforcement and role-based access control will be enabled in Phase 5.)*
+
+---
+
+## 3. Password Security & BCrypt Hashing (Phase 3)
 
 ### Registration Flow
 1. The client submits `fullName`, `email`, optional `phoneNumber`, and `password` to `POST /api/v1/users`.
@@ -28,168 +89,38 @@ Base URL (local): `http://localhost:8081/api/v1/users`
 5. Only the BCrypt hash is saved in the `password_hash` (`VARCHAR(255)`) column in PostgreSQL.
 6. The controller returns `UserResponse`, which **never** includes `password` or `passwordHash`.
 
-### Why Plaintext Passwords Are Never Stored
-- If a database backup, query log, or table is ever exposed, plaintext passwords would immediately compromise user accounts across SmartCare and any other services where users reuse passwords.
-- BCrypt is a one-way adaptive hashing algorithm with a built-in random salt per password, making brute-force and rainbow-table attacks computationally expensive.
-
-### Why Password Hashes Are Excluded from API Responses
-- Exposing even a password hash in `POST`, `GET`, or `PUT` responses leaks sensitive credential material to clients, logs, and browser/proxy caches.
-- Keeping `UserResponse` strictly limited to non-sensitive profile fields (`id`, `fullName`, `email`, `phoneNumber`, `createdAt`, `updatedAt`) ensures credentials never leave the backend.
+### Why Plaintext Passwords Are Never Stored & Hashes Are Excluded
+- Storing only salted BCrypt hashes protects user credentials if the database is ever exposed.
+- Keeping `UserResponse` and `LoginResponse` strictly limited to non-sensitive profile fields ensures credentials never leave the backend.
 
 ---
 
-## 3. Implemented Input Validations
+## 4. Implemented Input Validations
 
-Validation is enforced on the request DTOs using Jakarta Bean Validation (`@Valid` in `UserController`) and `StrictStringDeserializer` (which rejects numbers, booleans, arrays, and objects for string fields with `400 Bad Request`):
+Validation is enforced on the request DTOs using Jakarta Bean Validation (`@Valid`) and `StrictStringDeserializer` (which rejects numbers, booleans, arrays, and objects for string fields with `400 Bad Request`):
 
 | Field | DTOs | Rules |
 | --- | --- | --- |
-| `fullName` | `UserRegistrationRequest`, `UserRequest` | Required (`@NotBlank`), max `100` characters (`@Size(max = 100)`), must be a JSON string. Trimmed before saving. |
-| `email` | `UserRegistrationRequest`, `UserRequest` | Required (`@NotBlank`), valid email format (`@Email`), max `254` characters (`@Size(max = 254)`), unique across all users, must be a JSON string. Normalized to lowercase and trimmed. |
-| `phoneNumber` | `UserRegistrationRequest`, `UserRequest` | Optional. If provided, max `20` characters (`@Size(max = 20)`), must match `^$\|^[+]?[0-9][0-9\s\-()]{6,19}$` (`@Pattern`), must be a JSON string. Blank values are stored as `null`. |
-| `password` | `UserRegistrationRequest` only | Required (`@NotBlank`), minimum `8` characters (`@Size(min = 8)`), maximum `72` UTF-8 bytes (`@BcryptMaxBytes` for BCrypt compatibility), must be a JSON string. |
-
----
-
-## 4. Request & Response Examples
-
-### Valid Registration Request (`POST /api/v1/users`)
-
-**Request JSON:**
-```json
-{
-  "fullName": "Aarav Sharma",
-  "email": "aarav.sharma@example.com",
-  "phoneNumber": "+91-9876543210",
-  "password": "StrongPassword123!"
-}
-```
-
-**Response JSON (`201 Created`):**
-*(Note: `password` and `passwordHash` are never returned.)*
-```json
-{
-  "id": 1,
-  "fullName": "Aarav Sharma",
-  "email": "aarav.sharma@example.com",
-  "phoneNumber": "+91-9876543210",
-  "createdAt": "2026-11-26T13:30:00Z",
-  "updatedAt": "2026-11-26T13:30:00Z"
-}
-```
-
-### Get All Users (`GET /api/v1/users`)
-
-**Response JSON (`200 OK`):**
-```json
-[
-  {
-    "id": 1,
-    "fullName": "Aarav Sharma",
-    "email": "aarav.sharma@example.com",
-    "phoneNumber": "+91-9876543210",
-    "createdAt": "2026-11-26T13:30:00Z",
-    "updatedAt": "2026-11-26T13:30:00Z"
-  }
-]
-```
-
-### Get User by ID (`GET /api/v1/users/{id}`)
-
-**Response JSON (`200 OK`):**
-```json
-{
-  "id": 1,
-  "fullName": "Aarav Sharma",
-  "email": "aarav.sharma@example.com",
-  "phoneNumber": "+91-9876543210",
-  "createdAt": "2026-11-26T13:30:00Z",
-  "updatedAt": "2026-11-26T13:30:00Z"
-}
-```
-
-### Update User (`PUT /api/v1/users/{id}`)
-
-**Request JSON:**
-```json
-{
-  "fullName": "Aarav R. Sharma",
-  "email": "aarav.sharma@example.com",
-  "phoneNumber": "+91-9876500000"
-}
-```
-
-**Response JSON (`200 OK`):**
-```json
-{
-  "id": 1,
-  "fullName": "Aarav R. Sharma",
-  "email": "aarav.sharma@example.com",
-  "phoneNumber": "+91-9876500000",
-  "createdAt": "2026-11-26T13:30:00Z",
-  "updatedAt": "2026-11-26T13:35:00Z"
-}
-```
-
-### Delete User (`DELETE /api/v1/users/{id}`)
-
-- Returns `204 No Content` with an empty response body.
+| `fullName` | `UserRegistrationRequest`, `UserRequest` | Required (`@NotBlank`), max `100` characters, JSON string only. |
+| `email` | `UserRegistrationRequest`, `UserRequest`, `LoginRequest` | Required (`@NotBlank`), valid email (`@Email`), max `254` characters, JSON string only. |
+| `phoneNumber` | `UserRegistrationRequest`, `UserRequest` | Optional, max `20` characters, matches international phone `@Pattern`, JSON string only. |
+| `password` | `UserRegistrationRequest` | Required (`@NotBlank`), min `8` characters, max `72` UTF-8 bytes (`@BcryptMaxBytes`), JSON string only. |
+| `password` | `LoginRequest` | Required (`@NotBlank`), JSON string only. |
 
 ---
 
 ## 5. Error Response Format & HTTP Status Codes
 
-All errors are handled centrally by `GlobalExceptionHandler` (`@RestControllerAdvice`) and never expose stack traces, SQL queries, passwords, or credentials.
-
 | HTTP Status | Condition | Description |
 | --- | --- | --- |
-| `200 OK` | Successful `GET` or `PUT` | Request succeeded |
-| `201 Created` | Successful `POST` | User registered |
+| `200 OK` | Successful `GET`, `PUT`, or `POST /api/v1/auth/login` | Request succeeded |
+| `201 Created` | Successful `POST /api/v1/users` | User registered |
 | `204 No Content` | Successful `DELETE` | User deleted |
-| `400 Bad Request` | `MethodArgumentNotValidException`, `HttpMessageNotReadableException`, `MethodArgumentTypeMismatchException` | Invalid request data, non-string JSON field type, malformed JSON, or invalid path parameter |
+| `400 Bad Request` | Validation error, non-string JSON field, malformed JSON | Invalid request data |
+| `401 Unauthorized` | `InvalidCredentialsException` | Invalid email or password |
 | `404 Not Found` | `ResourceNotFoundException` / `UserNotFoundException` | Requested user does not exist |
-| `409 Conflict` | `DuplicateEmailException` or unique email `DataIntegrityViolationException` | Email address is already in use |
+| `409 Conflict` | `DuplicateEmailException` or unique email constraint violation | Email address is already in use |
 | `500 Internal Server Error` | Unhandled `Exception` | Generic unexpected server error |
-
-### Example Invalid Registration Request (`400 Bad Request`)
-
-**Request JSON:**
-```json
-{
-  "fullName": "   ",
-  "email": "not-an-email",
-  "password": "short"
-}
-```
-
-**Response JSON (`400 Bad Request`):**
-```json
-{
-  "timestamp": "2026-11-26T13:30:00Z",
-  "status": 400,
-  "error": "Bad Request",
-  "message": "Validation failed for one or more fields.",
-  "path": "/api/v1/users",
-  "fieldErrors": {
-    "fullName": "Full name is required",
-    "email": "Email must be a valid email address",
-    "password": "Password must be at least 8 characters"
-  }
-}
-```
-
-### Example Duplicate Email Response (`409 Conflict`)
-
-**Response JSON (`409 Conflict`):**
-```json
-{
-  "timestamp": "2026-11-26T13:30:00Z",
-  "status": 409,
-  "error": "Conflict",
-  "message": "A user with email 'aarav.sharma@example.com' already exists.",
-  "path": "/api/v1/users"
-}
-```
 
 ---
 
@@ -200,6 +131,8 @@ All errors are handled centrally by `GlobalExceptionHandler` (`@RestControllerAd
 | `DB_URL` | Supabase PostgreSQL JDBC URL with SSL enabled | `jdbc:postgresql://<host>:<port>/<database>?sslmode=require` |
 | `DB_USERNAME` | Supabase PostgreSQL username | `<your-db-username>` |
 | `DB_PASSWORD` | Supabase PostgreSQL password | `<your-db-password>` |
+| `JWT_SECRET` | **Required** HS256 signing secret (at least 32 characters / 256 bits; **never** reuse `DB_PASSWORD` or commit to Git) | `<32+-char-random-secret>` |
+| `JWT_EXPIRATION_MS` | Optional token lifetime in milliseconds (defaults to `3600000` = 1 hour) | `3600000` |
 | `SPRING_PROFILES_ACTIVE` | Optional active Spring profile (`dev` by default, `prod` for production) | `dev` |
 | `SERVER_PORT` | Optional server port (defaults to `8081`) | `8081` |
 
@@ -211,15 +144,17 @@ All errors are handled centrally by `GlobalExceptionHandler` (`@RestControllerAd
    ```powershell
    cd backend\user-service
    ```
-2. Run automated tests (does not require a live Supabase connection):
+2. Run automated tests (does not require a live Supabase connection or real `JWT_SECRET`):
    ```powershell
    .\mvnw.cmd clean test
    ```
-3. Set your Supabase PostgreSQL environment variables for the current PowerShell session:
+3. Generate a strong local `JWT_SECRET` (at least 32 characters) and set environment variables for the current PowerShell session:
    ```powershell
    $env:DB_URL="jdbc:postgresql://<your-supabase-host>:<port>/<db>?sslmode=require"
    $env:DB_USERNAME="<your-supabase-username>"
    $env:DB_PASSWORD="<your-supabase-password>"
+   $env:JWT_SECRET="replace-with-your-own-32-plus-character-random-secret-key"
+   $env:JWT_EXPIRATION_MS="3600000"
    ```
 4. Start the service:
    ```powershell

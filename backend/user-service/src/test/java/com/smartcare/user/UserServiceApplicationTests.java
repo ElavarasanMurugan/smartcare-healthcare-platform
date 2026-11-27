@@ -9,7 +9,8 @@ import org.springframework.boot.test.context.SpringBootTest;
         "spring.datasource.password=test",
         "spring.datasource.hikari.initialization-fail-timeout=-1",
         "spring.jpa.hibernate.ddl-auto=none",
-        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect"
+        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect",
+        "jwt.secret=test-only-jwt-secret-key-with-at-least-32-bytes!"
 })
 class UserServiceApplicationTests {
 

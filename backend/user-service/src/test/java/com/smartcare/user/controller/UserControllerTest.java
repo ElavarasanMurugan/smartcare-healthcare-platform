@@ -1,5 +1,6 @@
 package com.smartcare.user.controller;
 
+import com.smartcare.user.config.SecurityConfig;
 import com.smartcare.user.dto.UserRegistrationRequest;
 import com.smartcare.user.dto.UserRequest;
 import com.smartcare.user.dto.UserResponse;
@@ -32,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(UserController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, SecurityConfig.class})
 class UserControllerTest {
 
     @Autowired
