@@ -1,5 +1,6 @@
 package com.smartcare.user.dto;
 
+import com.smartcare.user.entity.Role;
 import com.smartcare.user.entity.User;
 
 /**
@@ -19,10 +20,16 @@ public record LoginResponse(
     public record UserSummary(
             Long id,
             String fullName,
-            String email
+            String email,
+            Role role
     ) {
         public static UserSummary fromEntity(User user) {
-            return new UserSummary(user.getId(), user.getFullName(), user.getEmail());
+            return new UserSummary(
+                    user.getId(),
+                    user.getFullName(),
+                    user.getEmail(),
+                    user.getEffectiveRole()
+            );
         }
     }
 }

@@ -3,14 +3,20 @@ package com.smartcare.user.controller;
 import com.smartcare.user.config.SecurityConfig;
 import com.smartcare.user.dto.LoginRequest;
 import com.smartcare.user.dto.LoginResponse;
+import com.smartcare.user.entity.Role;
 import com.smartcare.user.exception.GlobalExceptionHandler;
 import com.smartcare.user.exception.InvalidCredentialsException;
+import com.smartcare.user.security.JwtAuthenticationFilter;
+import com.smartcare.user.security.JwtService;
+import com.smartcare.user.security.RestAccessDeniedHandler;
+import com.smartcare.user.security.RestAuthenticationEntryPoint;
 import com.smartcare.user.service.AuthService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -21,7 +27,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(AuthController.class)
-@Import({GlobalExceptionHandler.class, SecurityConfig.class})
+@Import({
+        GlobalExceptionHandler.class,
+        SecurityConfig.class,
+        JwtAuthenticationFilter.class,
+        RestAuthenticationEntryPoint.class,
+        RestAccessDeniedHandler.class,
+        JwtService.class
+})
+@TestPropertySource(properties = "jwt.secret=test-only-jwt-secret-key-with-at-least-32-bytes!")
 class AuthControllerTest {
 
     @Autowired
@@ -36,7 +50,7 @@ class AuthControllerTest {
                 "eyJhbGciOiJIUzI1NiJ9.payload.signature",
                 "Bearer",
                 3600L,
-                new LoginResponse.UserSummary(1L, "Arun Kumar", "arun.phase3@example.com")
+                new LoginResponse.UserSummary(1L, "Arun Kumar", "arun.phase3@example.com", Role.PATIENT)
         );
         when(authService.login(any(LoginRequest.class))).thenReturn(response);
 

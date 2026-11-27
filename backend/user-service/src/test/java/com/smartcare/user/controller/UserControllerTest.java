@@ -4,9 +4,16 @@ import com.smartcare.user.config.SecurityConfig;
 import com.smartcare.user.dto.UserRegistrationRequest;
 import com.smartcare.user.dto.UserRequest;
 import com.smartcare.user.dto.UserResponse;
+import com.smartcare.user.entity.Role;
+import com.smartcare.user.entity.User;
 import com.smartcare.user.exception.DuplicateEmailException;
 import com.smartcare.user.exception.GlobalExceptionHandler;
 import com.smartcare.user.exception.UserNotFoundException;
+import com.smartcare.user.security.JwtAuthenticationFilter;
+import com.smartcare.user.security.JwtService;
+import com.smartcare.user.security.RestAccessDeniedHandler;
+import com.smartcare.user.security.RestAuthenticationEntryPoint;
+import com.smartcare.user.security.UserSecurity;
 import com.smartcare.user.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +21,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -33,19 +41,38 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(UserController.class)
-@Import({GlobalExceptionHandler.class, SecurityConfig.class})
+@Import({
+        GlobalExceptionHandler.class,
+        SecurityConfig.class,
+        JwtAuthenticationFilter.class,
+        RestAuthenticationEntryPoint.class,
+        RestAccessDeniedHandler.class,
+        JwtService.class,
+        UserSecurity.class
+})
+@TestPropertySource(properties = "jwt.secret=test-only-jwt-secret-key-with-at-least-32-bytes!")
 class UserControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private JwtService jwtService;
+
     @MockitoBean
     private UserService userService;
+
+    private String bearerTokenFor(Long userId, Role role) {
+        User user = new User("Test User", "user" + userId + "@example.com", null, "hash");
+        user.setId(userId);
+        user.setRole(role);
+        return "Bearer " + jwtService.generateToken(user);
+    }
 
     @Test
     void createUser_validRequest_returns201WithoutCredentials() throws Exception {
         Instant now = Instant.parse("2026-01-01T10:00:00Z");
-        UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", "+91-9876543210", now, now);
+        UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", "+91-9876543210", Role.PATIENT, now, now);
         when(userService.createUser(any(UserRegistrationRequest.class))).thenReturn(response);
 
         String body = """
@@ -64,6 +91,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.fullName").value("Aarav Sharma"))
                 .andExpect(jsonPath("$.email").value("aarav@example.com"))
+                .andExpect(jsonPath("$.role").value("PATIENT"))
                 .andExpect(jsonPath("$.password").doesNotExist())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist());
     }
@@ -314,13 +342,31 @@ class UserControllerTest {
     }
 
     @Test
-    void getAllUsers_returns200WithoutCredentials() throws Exception {
+    void getAllUsers_unauthenticated_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/users"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"));
+    }
+
+    @Test
+    void getAllUsers_asPatient_returns403() throws Exception {
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"));
+    }
+
+    @Test
+    void getAllUsers_asAdmin_returns200WithoutCredentials() throws Exception {
         Instant now = Instant.parse("2026-01-01T10:00:00Z");
         when(userService.getAllUsers()).thenReturn(List.of(
-                new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, now, now)
+                new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, Role.PATIENT, now, now)
         ));
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", bearerTokenFor(999L, Role.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(1))
                 .andExpect(jsonPath("$[0].email").value("aarav@example.com"))
@@ -329,12 +375,36 @@ class UserControllerTest {
     }
 
     @Test
-    void getUserById_found_returns200WithoutCredentials() throws Exception {
+    void getUserById_unauthenticated_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/users/1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401));
+    }
+
+    @Test
+    void getUserById_invalidBearerToken_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/users/1")
+                        .header("Authorization", "Bearer invalid.jwt.token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401));
+    }
+
+    @Test
+    void getUserById_otherPatient_returns403() throws Exception {
+        mockMvc.perform(get("/api/v1/users/2")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void getUserById_ownerPatient_returns200WithoutCredentials() throws Exception {
         Instant now = Instant.parse("2026-01-01T10:00:00Z");
-        UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, now, now);
+        UserResponse response = new UserResponse(1L, "Aarav Sharma", "aarav@example.com", null, Role.PATIENT, now, now);
         when(userService.getUserById(1L)).thenReturn(response);
 
-        mockMvc.perform(get("/api/v1/users/1"))
+        mockMvc.perform(get("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.fullName").value("Aarav Sharma"))
@@ -343,19 +413,20 @@ class UserControllerTest {
     }
 
     @Test
-    void getUserById_notFound_returns404() throws Exception {
+    void getUserById_notFoundAsAdmin_returns404() throws Exception {
         when(userService.getUserById(99L)).thenThrow(new UserNotFoundException(99L));
 
-        mockMvc.perform(get("/api/v1/users/99"))
+        mockMvc.perform(get("/api/v1/users/99")
+                        .header("Authorization", bearerTokenFor(999L, Role.ADMIN)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"));
     }
 
     @Test
-    void updateUser_validRequest_returns200() throws Exception {
+    void updateUser_validRequestAsOwner_returns200() throws Exception {
         Instant now = Instant.parse("2026-01-01T10:00:00Z");
-        UserResponse response = new UserResponse(1L, "Updated Name", "updated@example.com", "9876543210", now, now);
+        UserResponse response = new UserResponse(1L, "Updated Name", "updated@example.com", "9876543210", Role.PATIENT, now, now);
         when(userService.updateUser(eq(1L), any(UserRequest.class))).thenReturn(response);
 
         String body = """
@@ -367,6 +438,7 @@ class UserControllerTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -374,6 +446,23 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.email").value("updated@example.com"))
                 .andExpect(jsonPath("$.password").doesNotExist())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist());
+    }
+
+    @Test
+    void updateUser_otherPatient_returns403() throws Exception {
+        String body = """
+                {
+                  "fullName": "Updated Name",
+                  "email": "updated@example.com"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/users/2")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
     }
 
     @Test
@@ -386,6 +475,7 @@ class UserControllerTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -403,6 +493,7 @@ class UserControllerTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -420,6 +511,7 @@ class UserControllerTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -438,6 +530,7 @@ class UserControllerTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -446,7 +539,7 @@ class UserControllerTest {
     }
 
     @Test
-    void updateUser_notFound_returns404() throws Exception {
+    void updateUser_notFoundAsAdmin_returns404() throws Exception {
         when(userService.updateUser(eq(99L), any(UserRequest.class)))
                 .thenThrow(new UserNotFoundException(99L));
 
@@ -458,6 +551,7 @@ class UserControllerTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/99")
+                        .header("Authorization", bearerTokenFor(999L, Role.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -465,18 +559,28 @@ class UserControllerTest {
     }
 
     @Test
-    void deleteUser_returns204() throws Exception {
+    void deleteUser_asPatient_returns403() throws Exception {
+        mockMvc.perform(delete("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(1L, Role.PATIENT)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void deleteUser_asAdmin_returns204() throws Exception {
         doNothing().when(userService).deleteUser(1L);
 
-        mockMvc.perform(delete("/api/v1/users/1"))
+        mockMvc.perform(delete("/api/v1/users/1")
+                        .header("Authorization", bearerTokenFor(999L, Role.ADMIN)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    void deleteUser_notFound_returns404() throws Exception {
+    void deleteUser_notFoundAsAdmin_returns404() throws Exception {
         doThrow(new UserNotFoundException(99L)).when(userService).deleteUser(99L);
 
-        mockMvc.perform(delete("/api/v1/users/99"))
+        mockMvc.perform(delete("/api/v1/users/99")
+                        .header("Authorization", bearerTokenFor(999L, Role.ADMIN)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
     }
@@ -485,7 +589,8 @@ class UserControllerTest {
     void unexpectedError_returns500WithGenericMessage() throws Exception {
         when(userService.getAllUsers()).thenThrow(new RuntimeException("Internal DB password leak"));
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", bearerTokenFor(999L, Role.ADMIN)))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.status").value(500))
                 .andExpect(jsonPath("$.message").value("An unexpected error occurred. Please try again later."));

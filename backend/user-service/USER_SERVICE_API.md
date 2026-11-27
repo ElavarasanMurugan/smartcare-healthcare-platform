@@ -8,14 +8,14 @@ Base URL (local): `http://localhost:8081`
 
 ## 1. Endpoints Overview
 
-| HTTP Method | Endpoint | Description | Request DTO | Success Status |
+| HTTP Method | Endpoint | Description | Access | Success Status |
 | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/auth/login` | Authenticate user and issue JWT | `LoginRequest` | `200 OK` |
-| `POST` | `/api/v1/users` | Register a new user with a password | `UserRegistrationRequest` | `201 Created` |
-| `GET` | `/api/v1/users` | Retrieve all users | — | `200 OK` |
-| `GET` | `/api/v1/users/{id}` | Retrieve a user by ID | — | `200 OK` |
-| `PUT` | `/api/v1/users/{id}` | Update user profile details | `UserRequest` | `200 OK` |
-| `DELETE` | `/api/v1/users/{id}` | Delete a user by ID | — | `204 No Content` |
+| `POST` | `/api/v1/auth/login` | Authenticate user and issue JWT | Public | `200 OK` |
+| `POST` | `/api/v1/users` | Register a new user (`PATIENT` role) | Public | `201 Created` |
+| `GET` | `/api/v1/users` | Retrieve all users | `ADMIN` only | `200 OK` |
+| `GET` | `/api/v1/users/{id}` | Retrieve a user by ID | `ADMIN` or Owner | `200 OK` |
+| `PUT` | `/api/v1/users/{id}` | Update user profile details | `ADMIN` or Owner | `200 OK` |
+| `DELETE` | `/api/v1/users/{id}` | Delete a user by ID | `ADMIN` only | `204 No Content` |
 
 ---
 
@@ -70,12 +70,13 @@ A JSON Web Token (JWT) has three Base64URL-encoded parts separated by dots (`hea
    - *Passwords and password hashes are never included in JWT claims.*
 3. **Signature**: HMAC-SHA256 signature computed with `JWT_SECRET` so any tampering is detected.
 
-### Sending the Token in Future Requests
-Clients should include the token in the HTTP `Authorization` header:
+### Sending the Token in Protected Requests
+Clients must include the JWT in the HTTP `Authorization` header for protected endpoints:
 ```http
 Authorization: Bearer <accessToken>
 ```
-*(Note: In Phase 4, Spring Security is configured as stateless with CSRF, HTTP Basic, and form login disabled, permitting `/api/v1/auth/login` and `/api/v1/users/**`. Endpoint-level JWT enforcement and role-based access control will be enabled in Phase 5.)*
+- Requests without a valid Bearer token receive `401 Unauthorized`.
+- Authenticated requests lacking the required role (`ADMIN`) or resource ownership receive `403 Forbidden`.
 
 ---
 

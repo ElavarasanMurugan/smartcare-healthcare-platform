@@ -2,6 +2,8 @@ package com.smartcare.user.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -43,6 +45,11 @@ public class User {
     // Nullable at the DB column level so existing rows without passwords remain migration-safe.
     @Column(name = "password_hash", length = 255)
     private String passwordHash;
+
+    // Nullable at the DB column level so existing rows remain migration-safe; defaults to PATIENT.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", length = 30)
+    private Role role = Role.PATIENT;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -119,6 +126,18 @@ public class User {
 
     public void setPasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
+    }
+
+    public Role getRole() {
+        return role;
+    }
+
+    public void setRole(Role role) {
+        this.role = role;
+    }
+
+    public Role getEffectiveRole() {
+        return role != null ? role : Role.PATIENT;
     }
 
     public Instant getCreatedAt() {

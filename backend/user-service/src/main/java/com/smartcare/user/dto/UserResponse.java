@@ -1,5 +1,6 @@
 package com.smartcare.user.dto;
 
+import com.smartcare.user.entity.Role;
 import com.smartcare.user.entity.User;
 
 import java.time.Instant;
@@ -12,6 +13,7 @@ public record UserResponse(
         String fullName,
         String email,
         String phoneNumber,
+        Role role,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -25,6 +27,7 @@ public record UserResponse(
                 user.getFullName(),
                 user.getEmail(),
                 user.getPhoneNumber(),
+                user.getEffectiveRole(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );

@@ -53,6 +53,7 @@ public class JwtService {
                 .and()
                 .subject(String.valueOf(user.getId()))
                 .claim("email", user.getEmail())
+                .claim("role", user.getEffectiveRole().name())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiresAt))
                 .signWith(signingKey, Jwts.SIG.HS256)
@@ -90,6 +91,10 @@ public class JwtService {
 
     public String extractEmail(String token) {
         return parseAndValidateToken(token).get("email", String.class);
+    }
+
+    public String extractRole(String token) {
+        return parseAndValidateToken(token).get("role", String.class);
     }
 
     public long getExpirationMs() {

@@ -52,6 +52,7 @@ class JwtServiceTest {
         assertEquals("42", claims.getSubject());
         assertEquals(42L, jwtService.extractUserId(token));
         assertEquals("arun.phase3@example.com", jwtService.extractEmail(token));
+        assertEquals("PATIENT", jwtService.extractRole(token));
         assertNotNull(claims.getIssuedAt());
         assertNotNull(claims.getExpiration());
         assertTrue(claims.getExpiration().after(claims.getIssuedAt()));
